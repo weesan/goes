@@ -159,9 +159,6 @@ func (shard *Shard) search(term string, size int) (map[string]interface{}, error
 			"_score":  hit.Score,
 			"_source": source,
 		})
-
-		//log.Printf(" Score: %f, source: %s (%s)\n",
-		//	hit.Score, source["store_name"], source["store_country"])
 	}
 
 	res["hits"].(json.Json)["hits"] = hits
