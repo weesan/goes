@@ -3,7 +3,7 @@
 The goal of GOES is to learn GO and use it to implement a drop-in
 replacement for, at least close to it or a subset of, [Java-based
 Elasticsearch](https://www.elastic.co/) at the API level.
-Bleve](https://github.com/blevesearch/bleve) is used as the backend
+[Bleve](https://github.com/blevesearch/bleve) is used as the backend
 data store.
 
 ## To create a repo
