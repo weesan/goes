@@ -17,6 +17,7 @@ package goes
 
 import (
 	"bufio"
+	"fmt"
 	"log"
 	"os"
 
@@ -28,33 +29,75 @@ import (
 const shardBatchSize = 1 << 16 // 65536
 
 type Shard struct {
-	db bleve.Index
+	num  uint
+	idx  string
+	home string
+	db   bleve.Index
 }
 
-type Shards map[string]*Shard
+type Shards map[uint]*Shard
 
-func newShard(name string) *Shard {
-	db, err := bleve.Open(name)
+func newShard(num uint, idx string, home string) *Shard {
+	path := fmt.Sprintf("%s/%s/%d", home, idx, num)
+	db, err := bleve.Open(path)
 	switch err {
 	case bleve.ErrorIndexPathDoesNotExist:
-		log.Printf("Creating new shard %s ...", name)
+		log.Printf("Creating new shard %s/%d", idx, num)
 
 		mapping := bleve.NewIndexMapping()
-		new_db, err := bleve.New(name, mapping)
+		new_db, err := bleve.New(path, mapping)
 		if err != nil {
 			log.Fatal(err)
 			return nil
 		}
 
-		log.Printf("Loading new shard %s ...", name)
-		return &Shard{new_db}
+		return &Shard{num, idx, home, new_db}
 	case nil:
-		log.Printf("Loading new shard %s ...", name)
-		return &Shard{db}
+		log.Printf("Loading shard %s/%d", idx, num)
+		return &Shard{num, idx, home, db}
 	default:
 		log.Fatal(err)
 		return nil
 	}
+}
+
+func (shard *Shard) close() {
+	shard.db.Close()
+}
+
+func (shard *Shard) count() uint64 {
+	if count, err := shard.db.DocCount(); err == nil {
+		return count
+	}
+	return 0
+}
+
+// The format of data is as follows:
+// { "id1": "json_str1", "id2": "json_str2", ... }
+func (shard *Shard) index(kv map[string]string) error {
+	// Batch index the data
+	batch := shard.db.NewBatch()
+	defer shard.db.Batch(batch)
+
+	size := 0
+	for id, line := range kv {
+		strLen := len(line)
+		if size+strLen >= shardBatchSize {
+			// Flush the current batch.
+			shard.db.Batch(batch)
+			// Start a new batch.
+			batch = shard.db.NewBatch()
+			// Reset the size.
+			size = 0
+		}
+
+		// Convert the json string to a map.
+		data := json.Loads(line)
+		// Index the data keyed by id.
+		batch.Index(id, data)
+	}
+
+	return nil
 }
 
 func (shard *Shard) indexJson(id_field string, json_file string) error {
@@ -104,8 +147,7 @@ for_loop:
 	return nil
 }
 
-func (shard *Shard) search(term string, size int) (map[string]interface{}, error) {
-	log.Printf("Searching for %s", term)
+func (shard *Shard) search(term string, size int) (json.Json, error) {
 	//query := bleve.NewMatchQuery("Nike")
 	query := bleve.NewQueryStringQuery(term)
 	search := bleve.NewSearchRequest(query)
@@ -150,11 +192,11 @@ func (shard *Shard) search(term string, size int) (map[string]interface{}, error
 
 		source := make(json.Json, 0)
 		doc.VisitFields(func(field index_api.Field) {
-			name, value := string(field.Name()), string(field.Value())
-			source[name] = value
+			key, value := string(field.Name()), string(field.Value())
+			source[key] = value
 		})
 		hits = append(hits, json.Json{
-			"_index":  "foo",
+			"_index":  shard.idx,
 			"_id":     id,
 			"_score":  hit.Score,
 			"_source": source,

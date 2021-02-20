@@ -3,12 +3,12 @@ package main
 import (
 	"flag"
 	"fmt"
-	_ "io/ioutil"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
 	"strconv"
-	_ "strings"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/weesan/goes/json"
@@ -95,41 +95,102 @@ func getQuery(query url.Values) string {
 	return q
 }
 
-func searchHandler(w http.ResponseWriter, r *http.Request) {
+func search_handler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("%s %s %s %s\n", r.RemoteAddr, r.Method, r.URL, r.Proto)
 
 	vars := mux.Vars(r)
-	index_name := vars["index"]
+	idx := vars["idx"]
 
 	query := r.URL.Query()
 
-	res, err := goes.Search(index_name, getQuery(query), getSize(query))
+	res, err := goes.Search(idx, getQuery(query), getSize(query))
 	response(w, r, res, err)
 }
 
-func countHandler(w http.ResponseWriter, r *http.Request) {
-	log.Println("countHandler")
+func count_handler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	idx := vars["idx"]
+	res, err := goes.Count(idx)
+	response(w, r, res, err)
 }
 
-func clusterHandle(w http.ResponseWriter, r *http.Request) {
-	log.Println("clusterHandle")
+func cluster_handler(w http.ResponseWriter, r *http.Request) {
+	var res json.Json
+	vars := mux.Vars(r)
+
+	switch vars["cmd"] {
+	case "health":
+		log.Printf("Getting cluster health")
+		res = json.Json{
+			"cluster_name": "weesan-goes",
+			"status":       "green",
+			"timed_out":    false,
+		}
+	}
+
+	response(w, r, res, nil)
 }
 
-func catHandle(w http.ResponseWriter, r *http.Request) {
-	log.Println("catHandle")
+func cat_handler(w http.ResponseWriter, r *http.Request) {
+	var res string
+	vars := mux.Vars(r)
+
+	switch vars["cmd"] {
+	case "indices":
+		log.Printf("Catting indices")
+		// TODO: more needs to be done here.
+		res = "index          health status pri rep docs.count docs.deleted store.size pri.store.size\n"
+		for idx, index := range goes.Indices() {
+			res += fmt.Sprintf("%-14s %-6s %-6s %3d %3d %10d\n",
+				idx, "green", "open", 1, 0, index.Count()["count"])
+		}
+	}
+
+	fmt.Fprintf(w, res)
 }
 
-func bulkHandle(w http.ResponseWriter, r *http.Request) {
+func bulk_handler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("%s %s %s %s\n", r.RemoteAddr, r.Method, r.URL, r.Proto)
+
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	var op, idx, id string
+	data := make(map[string]string, 0)
+	for i, line := range strings.Split(string(body), "\n") {
+		if i%2 == 0 {
+			// Operations such as index, delete, create, update, etc.
+			action := json.Loads(line)
+			for k, v := range action {
+				op = k
+				// meta := v.(json.Json)
+				meta := v.(map[string]interface{})
+				idx = meta["_index"].(string)
+				id = meta["_id"].(string)
+				break
+			}
+		} else {
+			// Data
+			if false {
+				log.Printf("%s %s %s", op, idx, id)
+				log.Printf("Data: %s", line)
+			}
+			data[id] = line
+		}
+	}
+	goes.Index(idx, data)
 }
 
 func serve(server string, port int) {
 	router := mux.NewRouter()
-	router.HandleFunc("/{index}/_search", searchHandler).Methods("GET")
-	router.HandleFunc("/{index}/_count", countHandler).Methods("GET")
-	router.HandleFunc("/_cluster/{cmd}", clusterHandle).Methods("GET")
-	router.HandleFunc("/_cat/{cmd}", catHandle).Methods("GET")
-	router.HandleFunc("/_bulk", bulkHandle).Methods("POST")
+	router.HandleFunc("/{idx}/_search", search_handler).Methods("GET")
+	router.HandleFunc("/{idx}/_count", count_handler).Methods("GET")
+	router.HandleFunc("/_cluster/{cmd}", cluster_handler).Methods("GET")
+	router.HandleFunc("/_cat/{cmd}", cat_handler).Methods("GET")
+	router.HandleFunc("/_bulk", bulk_handler).Methods("POST")
 
 	log.Printf("Listen on %s:%d", server, port)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf("%s:%d", server, port), router))
@@ -137,7 +198,7 @@ func serve(server string, port int) {
 
 func main() {
 	db_flag := flag.String("db", GOES_HOME, "Path to the database")
-	index_flag := flag.String("i", "", "Index name")
+	idx_flag := flag.String("i", "", "Index name")
 	id_flag := flag.String("id", "", "Id field")
 	server_flag := flag.String("s", "localhost", "Server address")
 	port_flag := flag.Int("p", 8080, "Port #")
@@ -148,28 +209,14 @@ func main() {
 		return
 	}
 
-	if *index_flag != "" {
-		// Create a new index
+	if *idx_flag != "" {
+		// Create a new index.
 		json_file := flag.Arg(0)
-		if err := goes.IndexJson(*index_flag, *id_flag, json_file); err != nil {
+		if err := goes.IndexJson(*idx_flag, *id_flag, json_file); err != nil {
 			log.Fatal(err)
 		}
 	} else {
+		// Serve HTTP requests.
 		serve(*server_flag, *port_flag)
-		/*
-			// Search against the index.
-			for _, arg := range flag.Args() {
-				//search_term := strings.Replace(arg, ":", "\\:", -1)
-				search_term := arg
-				if res, err := goes.Search(search_term, *size_flag); err == nil {
-					if j, err := json.Dumps(res); err != nil {
-						log.Println(err)
-						return
-					} else {
-						fmt.Println(string(j))
-					}
-				}
-			}
-		*/
 	}
 }

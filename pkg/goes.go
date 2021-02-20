@@ -10,7 +10,7 @@ import (
 )
 
 type Goes struct {
-	path    string
+	home    string
 	indices Indices
 }
 
@@ -23,8 +23,8 @@ func NewGoes() *Goes {
 }
 
 // Given an index name, find the pertinent index struct; or create one otherwise.
-func (goes *Goes) findIndex(indexName string, created ...bool) *Index {
-	if index, found := goes.indices[indexName]; found {
+func (goes *Goes) findIndex(idx string, created ...bool) *Index {
+	if index, found := goes.indices[idx]; found {
 		return index
 	}
 
@@ -34,28 +34,28 @@ func (goes *Goes) findIndex(indexName string, created ...bool) *Index {
 	}
 
 	// Otherwise, create one if it doesn't exist.
-	index, err := newIndex(fmt.Sprintf("%s/%s", goes.path, indexName))
+	index, err := newIndex(idx, goes.home)
 	if err != nil {
 		return nil
 	}
 
-	goes.indices[indexName] = index
+	goes.indices[idx] = index
 	return index
 }
 
-func (goes *Goes) Init(path string) error {
-	log.Printf("Loading indices from %s", path)
+func (goes *Goes) Init(home string) error {
+	log.Printf("Loading indices from %s", home)
 
-	// Check if the path exists.
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		log.Printf("GOES path, %s, doesn't exist, creating one.", path)
-		if err := os.Mkdir(path, 0755); err != nil {
+	// Check if the home path exists.
+	if _, err := os.Stat(home); os.IsNotExist(err) {
+		log.Printf("GOES home, %s, doesn't exist, creating one.", home)
+		if err := os.Mkdir(home, 0755); err != nil {
 			return err
 		}
 	}
 
 	// Scan for indices.
-	files, err := ioutil.ReadDir(path)
+	files, err := ioutil.ReadDir(home)
 	if err != nil {
 		return err
 	}
@@ -64,36 +64,63 @@ func (goes *Goes) Init(path string) error {
 
 	// Read in all the indices.
 	for _, file := range files {
-		index, err := newIndex(fmt.Sprintf("%s/%s", path, file.Name()))
+		idx := file.Name()
+		index, err := newIndex(idx, home)
 		if err != nil {
 			return err
 		}
 		indices[file.Name()] = index
 	}
 
-	goes.path = path
+	goes.home = home
 	goes.indices = indices
 	return nil
 }
 
-func (goes *Goes) IndexJson(indexName string, id_field string, json_file string) error {
-	index := goes.findIndex(indexName, true)
+func (goes *Goes) Count(idx string) (json.Json, error) {
+	log.Printf("Counting for index %s", idx)
+	index := goes.findIndex(idx)
 	if index == nil {
-		log.Printf("Failed to find index: %s", indexName)
-		return fmt.Errorf("Index not found: %s", indexName)
+		log.Printf("Failed to find index: %s", idx)
+		return nil, fmt.Errorf("Index not found: %s", idx)
 	}
 
-	log.Printf("Indexing %s from %s", indexName, json_file)
+	return index.Count(), nil
+}
+
+func (goes *Goes) Index(idx string, kv map[string]string) error {
+	index := goes.findIndex(idx, true)
+	if index == nil {
+		log.Printf("Failed to find index: %s", idx)
+		return fmt.Errorf("Index not found: %s", idx)
+	}
+
+	//log.Printf("Indexing %s: %s", idx, kv)
+	return index.index(kv)
+}
+
+func (goes *Goes) IndexJson(idx string, id_field string, json_file string) error {
+	index := goes.findIndex(idx, true)
+	if index == nil {
+		log.Printf("Failed to find index: %s", idx)
+		return fmt.Errorf("Index not found: %s", idx)
+	}
+
+	log.Printf("Indexing %s from %s", idx, json_file)
 	return index.indexJson(id_field, json_file)
 }
 
-func (goes *Goes) Search(indexName string, term string, size int) (json.Json, error) {
-	log.Printf("Searching for %s on index %s", term, indexName)
-	index := goes.findIndex(indexName)
+func (goes *Goes) Search(idx string, term string, size int) (json.Json, error) {
+	log.Printf("Searching for %s from index %s", term, idx)
+	index := goes.findIndex(idx)
 	if index == nil {
-		log.Printf("Failed to find index: %s", indexName)
-		return nil, fmt.Errorf("Index not found: %s", indexName)
+		log.Printf("Failed to find index: %s", idx)
+		return nil, fmt.Errorf("Index not found: %s", idx)
 	}
 
 	return index.search(term, size)
+}
+
+func (goes *Goes) Indices() Indices {
+	return goes.indices
 }
