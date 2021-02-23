@@ -2,13 +2,18 @@ package goes
 
 import (
 	"fmt"
+	"hash/fnv"
 	"io/ioutil"
 	"log"
 	"os"
+	"sort"
 	"strconv"
+	"time"
 
 	"github.com/weesan/goes/json"
 )
+
+const defaultNumOfShardsPerIndex = 5
 
 type Index struct {
 	idx    string
@@ -18,26 +23,32 @@ type Index struct {
 
 type Indices map[string]*Index
 
+func hash(id string) uint32 {
+	h := fnv.New32a()
+	h.Write([]byte(id))
+	return h.Sum32()
+}
+
 func newIndex(idx string, home string) (*Index, error) {
 	// Construct the path for the index.
 	path := fmt.Sprintf("%s/%s", home, idx)
 
 	// Check if the path exists, if not, create one.
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		log.Printf("Index %s doesn't exist, creating one.", idx)
+		log.Printf("Create index %s", idx)
 		if err := os.Mkdir(path, 0755); err != nil {
 			return nil, err
 		}
 
-		// Go ahead and create a shard.
-		// TODO: will need to determine default # of shards.
-		shard := newShard(0, idx, home)
-		shards := make(Shards, 1)
-		shards[0] = shard
+		// Go ahead and create a number of shards.
+		shards := make(Shards, defaultNumOfShardsPerIndex)
+		for i := uint(0); i < defaultNumOfShardsPerIndex; i++ {
+			shards[i] = newShard(i, idx, home)
+		}
 		return &Index{idx, home, shards}, nil
 	}
 
-	log.Printf("Loading index %s", idx)
+	log.Printf("Load index %s", idx)
 
 	// Scan the shards.
 	files, err := ioutil.ReadDir(path)
@@ -66,53 +77,121 @@ func (index *Index) close() {
 	}
 }
 
-func (index *Index) Count() json.Json {
+func (index *Index) count() json.Json {
 	total := uint64(0)
+	count := make(chan uint64)
+
+	// Gather the counts from different shards.
 	for _, shard := range index.shards {
-		count := shard.count()
-		total += count
+		go func(shard *Shard, count chan uint64) {
+			count <- shard.count()
+		}(shard, count)
+	}
+
+	// Sum up all the counts.
+	for range index.shards {
+		total += <-count
 	}
 
 	return json.Json{
 		"count": total,
 		"_shards": json.Json{
-			"total":      1,
-			"successful": 1,
+			"total":      len(index.shards),
+			"successful": len(index.shards),
 			"skipped":    0,
 			"failed":     0,
 		},
 	}
 }
 
-func (index *Index) index(kv map[string]string) error {
-	for _, shard := range index.shards {
-		if err := shard.index(kv); err != nil {
+func (index *Index) index(data []json.Json) error {
+	// Allocate some memory.
+	buckets := make([][]json.Json, len(index.shards))
+	for i := 0; i < len(index.shards); i++ {
+		buckets[i] = make([]json.Json, 0)
+	}
+
+	// Sharding.
+	for _, v := range data {
+		id := v["id"]
+		bucket := hash(id.(string)) % uint32(len(index.shards))
+		buckets[bucket] = append(buckets[bucket], v)
+	}
+
+	// Indexing.
+	done := make(chan bool, 0)
+	for i, shard := range index.shards {
+		go func(shard *Shard, data []json.Json, done chan bool) error {
+			err := shard.index(data)
+			if err != nil {
+				log.Printf("Failed to index shard %d: %v", shard.num, err)
+			}
+			done <- true
 			return err
-		}
+		}(shard, buckets[i], done)
+	}
+	for range index.shards {
+		<-done
 	}
 
 	return nil
 }
 
-func (index *Index) indexJson(id_field string, json_file string) error {
+func (index *Index) refresh() {
 	for _, shard := range index.shards {
-		if err := shard.indexJson(id_field, json_file); err != nil {
-			return err
-		}
+		go shard.refresh()
 	}
-
-	return nil
 }
 
 func (index *Index) search(term string, size int) (json.Json, error) {
+	start := time.Now()
+
+	ch := make(chan []json.Json)
 	for _, shard := range index.shards {
-		res, err := shard.search(term, size)
-		if err != nil {
-			return nil, err
-		}
-		// TODO: need to merge data from different shards.
-		return res, nil
+		go func(ch chan []json.Json, shard *Shard) {
+			res, _ := shard.search(term, size)
+			ch <- res
+		}(ch, shard)
 	}
 
-	return nil, nil
+	successful := 0
+	results := make([]json.Json, 0)
+	for range index.shards {
+		r := <-ch
+		if len(r) == 0 {
+			continue
+		}
+		successful++
+		results = append(results, r...)
+	}
+
+	// Sort the results.
+	sort.SliceStable(results, func(i, j int) bool {
+		s1 := results[i]["_score"].(float64)
+		s2 := results[j]["_score"].(float64)
+		return s1 > s2
+	})
+
+	// Truncate to the right size.
+	res := results[0:size]
+
+	took := time.Since(start)
+
+	return json.Json{
+		"took":      took.Microseconds(),
+		"timed_out": false,
+		"_shards": json.Json{
+			"total":      len(index.shards),
+			"successful": successful,
+			"skipped":    0,
+			"failed":     0,
+		},
+		"hits": json.Json{
+			"total": json.Json{
+				"value":    len(res),
+				"relation": "eq",
+			},
+			"hits": res,
+		},
+	}, nil
 }

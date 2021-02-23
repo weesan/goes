@@ -138,12 +138,7 @@ func cat_handler(w http.ResponseWriter, r *http.Request) {
 	switch vars["cmd"] {
 	case "indices":
 		log.Printf("Catting indices")
-		// TODO: more needs to be done here.
-		res = "index          health status pri rep docs.count docs.deleted store.size pri.store.size\n"
-		for idx, index := range goes.Indices() {
-			res += fmt.Sprintf("%-14s %-6s %-6s %3d %3d %10d\n",
-				idx, "green", "open", 1, 0, index.Count()["count"])
-		}
+		res = goes.CatIndices()
 	}
 
 	fmt.Fprintf(w, res)
@@ -159,7 +154,7 @@ func bulk_handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var op, idx, id string
-	data := make(map[string]string, 0)
+	data := make([]json.Json, 0)
 	for i, line := range strings.Split(string(body), "\n") {
 		if i%2 == 0 {
 			// Operations such as index, delete, create, update, etc.
@@ -178,10 +173,20 @@ func bulk_handler(w http.ResponseWriter, r *http.Request) {
 				log.Printf("%s %s %s", op, idx, id)
 				log.Printf("Data: %s", line)
 			}
-			data[id] = line
+			// Convert the json string to a map.
+			j := json.Loads(line)
+			j["id"] = id
+			data = append(data, j)
 		}
 	}
 	goes.Index(idx, data)
+}
+
+func refresh_handler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	idx := vars["idx"]
+	res, err := goes.Refresh(idx)
+	response(w, r, res, err)
 }
 
 func serve(server string, port int) {
@@ -191,6 +196,8 @@ func serve(server string, port int) {
 	router.HandleFunc("/_cluster/{cmd}", cluster_handler).Methods("GET")
 	router.HandleFunc("/_cat/{cmd}", cat_handler).Methods("GET")
 	router.HandleFunc("/_bulk", bulk_handler).Methods("POST")
+	router.HandleFunc("/{idx}/_refresh", refresh_handler).Methods("GET")
+	router.HandleFunc("/_refresh", refresh_handler).Methods("GET")
 
 	log.Printf("Listen on %s:%d", server, port)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf("%s:%d", server, port), router))
@@ -198,8 +205,6 @@ func serve(server string, port int) {
 
 func main() {
 	db_flag := flag.String("db", GOES_HOME, "Path to the database")
-	idx_flag := flag.String("i", "", "Index name")
-	id_flag := flag.String("id", "", "Id field")
 	server_flag := flag.String("s", "localhost", "Server address")
 	port_flag := flag.Int("p", 8080, "Port #")
 	flag.Parse()
@@ -209,14 +214,6 @@ func main() {
 		return
 	}
 
-	if *idx_flag != "" {
-		// Create a new index.
-		json_file := flag.Arg(0)
-		if err := goes.IndexJson(*idx_flag, *id_flag, json_file); err != nil {
-			log.Fatal(err)
-		}
-	} else {
-		// Serve HTTP requests.
-		serve(*server_flag, *port_flag)
-	}
+	// Serve HTTP requests.
+	serve(*server_flag, *port_flag)
 }

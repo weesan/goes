@@ -20,23 +20,12 @@ $ go mod init github.com/weesan/goes
 $ git clone https://github.com/weesan/goes
 ```
 
-## To index documents stored in a JSON file via CLI
-
-Before running the server, we need to index some data:
-```
-$ time go run main.go -i companies -id company_id data/companies.json
-$ time go run main.go -i products  -id asin       data/products.json
-```
-
-Alternatively, despite slower, one can start a server, then use the
-bulk API to index the data.
-
 ## To start a server
 ```
 $ go run main.go
 ```
 
-## To index documents stored in a JSON file via API
+## To index documents stored in a JSON file
 
 One can use [es](https://github.com/weesan/es_cli) to index the data:
 ```

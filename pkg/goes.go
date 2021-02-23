@@ -5,9 +5,12 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"time"
 
 	"github.com/weesan/goes/json"
 )
+
+const defaultIndexRefreshTimer = 2 * time.Second
 
 type Goes struct {
 	home    string
@@ -44,14 +47,15 @@ func (goes *Goes) findIndex(idx string, created ...bool) *Index {
 }
 
 func (goes *Goes) Init(home string) error {
-	log.Printf("Loading indices from %s", home)
 
 	// Check if the home path exists.
 	if _, err := os.Stat(home); os.IsNotExist(err) {
-		log.Printf("GOES home, %s, doesn't exist, creating one.", home)
+		log.Printf("Create %s", home)
 		if err := os.Mkdir(home, 0755); err != nil {
 			return err
 		}
+	} else {
+		log.Printf("Load indices from %s", home)
 	}
 
 	// Scan for indices.
@@ -74,6 +78,18 @@ func (goes *Goes) Init(home string) error {
 
 	goes.home = home
 	goes.indices = indices
+
+	// TODO: May move this to each individual index.
+	refreshTicker := time.NewTicker(defaultIndexRefreshTimer)
+	go func() {
+		for {
+			<-refreshTicker.C
+			for _, index := range goes.indices {
+				index.refresh()
+			}
+		}
+	}()
+
 	return nil
 }
 
@@ -85,10 +101,10 @@ func (goes *Goes) Count(idx string) (json.Json, error) {
 		return nil, fmt.Errorf("Index not found: %s", idx)
 	}
 
-	return index.Count(), nil
+	return index.count(), nil
 }
 
-func (goes *Goes) Index(idx string, kv map[string]string) error {
+func (goes *Goes) Index(idx string, data []json.Json) error {
 	index := goes.findIndex(idx, true)
 	if index == nil {
 		log.Printf("Failed to find index: %s", idx)
@@ -96,18 +112,29 @@ func (goes *Goes) Index(idx string, kv map[string]string) error {
 	}
 
 	//log.Printf("Indexing %s: %s", idx, kv)
-	return index.index(kv)
+	return index.index(data)
 }
 
-func (goes *Goes) IndexJson(idx string, id_field string, json_file string) error {
-	index := goes.findIndex(idx, true)
-	if index == nil {
-		log.Printf("Failed to find index: %s", idx)
-		return fmt.Errorf("Index not found: %s", idx)
+func (goes *Goes) Refresh(idx string) (json.Json, error) {
+	total := 0
+	if idx == "" {
+		for _, index := range goes.indices {
+			go index.refresh()
+		}
+		total = len(goes.indices)
+	} else {
+		index := goes.findIndex(idx)
+		index.refresh()
+		total = 1
 	}
 
-	log.Printf("Indexing %s from %s", idx, json_file)
-	return index.indexJson(id_field, json_file)
+	return json.Json{
+		"_shards": json.Json{
+			"total":      total,
+			"successful": total,
+			"failed":     0,
+		},
+	}, nil
 }
 
 func (goes *Goes) Search(idx string, term string, size int) (json.Json, error) {
@@ -121,6 +148,12 @@ func (goes *Goes) Search(idx string, term string, size int) (json.Json, error) {
 	return index.search(term, size)
 }
 
-func (goes *Goes) Indices() Indices {
-	return goes.indices
+// TODO: more needs to be done here.
+func (goes *Goes) CatIndices() string {
+	res := "index          health status pri rep docs.count docs.deleted store.size pri.store.size\n"
+	for idx, index := range goes.indices {
+		res += fmt.Sprintf("%-14s %-6s %-6s %3d %3d %10d\n",
+			idx, "green", "open", len(index.shards), 0, index.count()["count"])
+	}
+	return res
 }
