@@ -17,7 +17,7 @@ import (
 
 const GOES_HOME = "/tmp/goes"
 
-var goes = Goes.NewGoes()
+var goes *Goes.Goes
 
 func pretty(query url.Values) bool {
 	res := false
@@ -209,7 +209,8 @@ func main() {
 	port_flag := flag.Int("p", 8080, "Port #")
 	flag.Parse()
 
-	if err := goes.Init(*db_flag); err != nil {
+	var err error
+	if goes, err = Goes.NewGoes(*db_flag); err != nil {
 		log.Fatal(err)
 		return
 	}

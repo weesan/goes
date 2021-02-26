@@ -21,8 +21,47 @@ func init() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 }
 
-func NewGoes() *Goes {
-	return &Goes{}
+func NewGoes(home string) (*Goes, error) {
+	// Check if the home path exists.
+	if _, err := os.Stat(home); os.IsNotExist(err) {
+		log.Printf("Create %s", home)
+		if err := os.Mkdir(home, 0755); err != nil {
+			return nil, err
+		}
+	} else {
+		log.Printf("Load indices from %s", home)
+	}
+
+	// Scan for indices.
+	files, err := ioutil.ReadDir(home)
+	if err != nil {
+		return nil, err
+	}
+
+	indices := make(Indices, len(files))
+
+	// Read in all the indices.
+	for _, file := range files {
+		idx := file.Name()
+		index, err := newIndex(idx, home)
+		if err != nil {
+			return nil, err
+		}
+		indices[file.Name()] = index
+	}
+
+	// TODO: May move this to each individual index.
+	refreshTicker := time.NewTicker(defaultIndexRefreshTimer)
+	go func() {
+		for {
+			<-refreshTicker.C
+			for _, index := range indices {
+				index.refresh()
+			}
+		}
+	}()
+
+	return &Goes{home, indices}, nil
 }
 
 // Given an index name, find the pertinent index struct; or create one otherwise.
@@ -44,53 +83,6 @@ func (goes *Goes) findIndex(idx string, created ...bool) *Index {
 
 	goes.indices[idx] = index
 	return index
-}
-
-func (goes *Goes) Init(home string) error {
-
-	// Check if the home path exists.
-	if _, err := os.Stat(home); os.IsNotExist(err) {
-		log.Printf("Create %s", home)
-		if err := os.Mkdir(home, 0755); err != nil {
-			return err
-		}
-	} else {
-		log.Printf("Load indices from %s", home)
-	}
-
-	// Scan for indices.
-	files, err := ioutil.ReadDir(home)
-	if err != nil {
-		return err
-	}
-
-	indices := make(Indices, len(files))
-
-	// Read in all the indices.
-	for _, file := range files {
-		idx := file.Name()
-		index, err := newIndex(idx, home)
-		if err != nil {
-			return err
-		}
-		indices[file.Name()] = index
-	}
-
-	goes.home = home
-	goes.indices = indices
-
-	// TODO: May move this to each individual index.
-	refreshTicker := time.NewTicker(defaultIndexRefreshTimer)
-	go func() {
-		for {
-			<-refreshTicker.C
-			for _, index := range goes.indices {
-				index.refresh()
-			}
-		}
-	}()
-
-	return nil
 }
 
 func (goes *Goes) Count(idx string) (json.Json, error) {
