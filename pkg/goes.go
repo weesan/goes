@@ -12,16 +12,31 @@ import (
 
 const defaultIndexRefreshTimer = 2 * time.Second
 
+const (
+	GREEN = iota
+	YELLOW
+	RED
+)
+
+type status int
+
 type Goes struct {
+	cluster string
 	home    string
-	indices Indices
+	indices indices
+	status  status
+	nodes   nodes
 }
 
 func init() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 }
 
-func NewGoes(home string) (*Goes, error) {
+func (s status) String() string {
+	return []string{"green", "yellow", "red"}[s]
+}
+
+func NewGoes(cluster, nodeName, home, discovery string) (*Goes, error) {
 	// Check if the home path exists.
 	if _, err := os.Stat(home); os.IsNotExist(err) {
 		log.Printf("Create %s", home)
@@ -38,7 +53,7 @@ func NewGoes(home string) (*Goes, error) {
 		return nil, err
 	}
 
-	indices := make(Indices, len(files))
+	indices := make(indices, len(files))
 
 	// Read in all the indices.
 	for _, file := range files {
@@ -61,11 +76,25 @@ func NewGoes(home string) (*Goes, error) {
 		}
 	}()
 
-	return &Goes{home, indices}, nil
+	// Manage the nodes.  Default is 1 node, the node itself.
+	nodes := make(nodes, 1)
+	node, err := newNode(nodeName, discovery)
+	if err != nil {
+		return nil, err
+	}
+	nodes[nodeName] = node
+
+	return &Goes{
+		cluster: cluster,
+		home:    home,
+		indices: indices,
+		status:  GREEN,
+		nodes:   nodes,
+	}, nil
 }
 
 // Given an index name, find the pertinent index struct; or create one otherwise.
-func (goes *Goes) findIndex(idx string, created ...bool) *Index {
+func (goes *Goes) findIndex(idx string, created ...bool) *index {
 	if index, found := goes.indices[idx]; found {
 		return index
 	}
@@ -140,12 +169,27 @@ func (goes *Goes) Search(idx string, term string, size int) (json.Json, error) {
 	return index.search(term, size)
 }
 
-// TODO: more needs to be done here.
+func (goes *Goes) ClusterHealth() json.Json {
+	return json.Json{
+		"cluster_name": goes.cluster,
+		"status":       fmt.Sprint(goes.status),
+		"timed_out":    false,
+	}
+}
+
 func (goes *Goes) CatIndices() string {
 	res := "index          health status pri rep docs.count docs.deleted store.size pri.store.size\n"
 	for idx, index := range goes.indices {
 		res += fmt.Sprintf("%-14s %-6s %-6s %3d %3d %10d\n",
 			idx, "green", "open", len(index.shards), 0, index.count()["count"])
+	}
+	return res
+}
+
+func (goes *Goes) CatNodes() string {
+	res := "ip        heap.percent ram.percent cpu load_1m load_5m load_15m node.role master name\n"
+	for _, node := range goes.nodes {
+		res += fmt.Sprintf("%-14s %-65s %-20s", node.ip, " ", node.name)
 	}
 	return res
 }

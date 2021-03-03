@@ -15,13 +15,13 @@ import (
 
 const defaultNumOfShardsPerIndex = 5
 
-type Index struct {
+type index struct {
 	idx    string
 	home   string
 	shards Shards
 }
 
-type Indices map[string]*Index
+type indices map[string]*index
 
 func hash(id string) uint32 {
 	h := fnv.New32a()
@@ -29,7 +29,7 @@ func hash(id string) uint32 {
 	return h.Sum32()
 }
 
-func newIndex(idx string, home string) (*Index, error) {
+func newIndex(idx string, home string) (*index, error) {
 	// Construct the path for the index.
 	path := fmt.Sprintf("%s/%s", home, idx)
 
@@ -45,7 +45,7 @@ func newIndex(idx string, home string) (*Index, error) {
 		for i := uint(0); i < defaultNumOfShardsPerIndex; i++ {
 			shards[i] = newShard(i, idx, home)
 		}
-		return &Index{idx, home, shards}, nil
+		return &index{idx, home, shards}, nil
 	}
 
 	log.Printf("Load index %s", idx)
@@ -68,16 +68,16 @@ func newIndex(idx string, home string) (*Index, error) {
 		shards[uint(num)] = shard
 	}
 
-	return &Index{idx, home, shards}, nil
+	return &index{idx, home, shards}, nil
 }
 
-func (index *Index) close() {
+func (index *index) close() {
 	for _, shard := range index.shards {
 		shard.close()
 	}
 }
 
-func (index *Index) count() json.Json {
+func (index *index) count() json.Json {
 	total := uint64(0)
 	count := make(chan uint64)
 
@@ -104,7 +104,7 @@ func (index *Index) count() json.Json {
 	}
 }
 
-func (index *Index) index(data []json.Json) error {
+func (index *index) index(data []json.Json) error {
 	// Allocate some memory.
 	buckets := make([][]json.Json, len(index.shards))
 	for i := 0; i < len(index.shards); i++ {
@@ -137,13 +137,13 @@ func (index *Index) index(data []json.Json) error {
 	return nil
 }
 
-func (index *Index) refresh() {
+func (index *index) refresh() {
 	for _, shard := range index.shards {
 		go shard.refresh()
 	}
 }
 
-func (index *Index) search(term string, size int) (json.Json, error) {
+func (index *index) search(term string, size int) (json.Json, error) {
 	start := time.Now()
 
 	ch := make(chan []json.Json)
@@ -173,6 +173,9 @@ func (index *Index) search(term string, size int) (json.Json, error) {
 	})
 
 	// Truncate to the right size.
+	if size > len(results) {
+		size = len(results)
+	}
 	res := results[0:size]
 
 	took := time.Since(start)

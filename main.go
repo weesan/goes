@@ -121,11 +121,7 @@ func cluster_handler(w http.ResponseWriter, r *http.Request) {
 	switch vars["cmd"] {
 	case "health":
 		log.Printf("Getting cluster health")
-		res = json.Json{
-			"cluster_name": "weesan-goes",
-			"status":       "green",
-			"timed_out":    false,
-		}
+		res = goes.ClusterHealth()
 	}
 
 	response(w, r, res, nil)
@@ -139,6 +135,9 @@ func cat_handler(w http.ResponseWriter, r *http.Request) {
 	case "indices":
 		log.Printf("Catting indices")
 		res = goes.CatIndices()
+	case "nodes":
+		log.Printf("Catting nodes")
+		res = goes.CatNodes()
 	}
 
 	fmt.Fprintf(w, res)
@@ -204,17 +203,22 @@ func serve(server string, port int) {
 }
 
 func main() {
-	db_flag := flag.String("db", GOES_HOME, "Path to the database")
-	server_flag := flag.String("s", "localhost", "Server address")
-	port_flag := flag.Int("p", 8080, "Port #")
+	cluster := flag.String("cluster", "GOES", "Name of the GOES cluster")
+	home := flag.String("home", GOES_HOME, "Path to the database")
+	nodeName := flag.String("node", "Node 1", "Node name")
+	discovery := flag.String(
+		"discovery", "239.1.1.1:9200", "Multicast address for node discovery")
+	port := flag.Int("p", 8080, "Port #")
+	server := flag.String("s", "localhost", "Server address")
 	flag.Parse()
 
 	var err error
-	if goes, err = Goes.NewGoes(*db_flag); err != nil {
+	goes, err = Goes.NewGoes(*cluster, *nodeName, *home, *discovery)
+	if err != nil {
 		log.Fatal(err)
 		return
 	}
 
 	// Serve HTTP requests.
-	serve(*server_flag, *port_flag)
+	serve(*server, *port)
 }
