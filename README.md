@@ -67,7 +67,7 @@ Alternatively, one can use [es](https://github.com/weesan/es_cli) to do the same
 $ es -p 8080 ls
 ```
 
-## Some examples without output
+## Some examples with output
 
 In one terminal, start the GOES server:
 ```
