@@ -137,8 +137,12 @@ func (shard *Shard) refresh() {
 }
 
 func (shard *Shard) search(term string, size int) ([]json.Json, error) {
-	query := bleve.NewQueryStringQuery(term)
-	search := bleve.NewSearchRequest(query)
+	var search *bleve.SearchRequest
+	if term == "" {
+		search = bleve.NewSearchRequest(bleve.NewMatchAllQuery())
+	} else {
+		search = bleve.NewSearchRequest(bleve.NewQueryStringQuery(term))
+	}
 
 	search_res, err := shard.db.Search(search)
 	if err != nil {
