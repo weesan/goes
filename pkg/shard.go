@@ -18,6 +18,7 @@ package goes
 import (
 	"fmt"
 	"log"
+	"os"
 	"sync"
 
 	"github.com/blevesearch/bleve/v2"
@@ -69,6 +70,16 @@ func newShard(num uint, idx string, home string) *Shard {
 
 func (shard *Shard) close() {
 	shard.db.Close()
+}
+
+func (shard *Shard) delete() {
+	shard.close()
+
+	path := fmt.Sprintf("%s/%s/%d", shard.home, shard.idx, shard.num)
+	err := os.RemoveAll(path)
+	if err != nil {
+		log.Println(err)
+	}
 }
 
 func (shard *Shard) count() uint64 {

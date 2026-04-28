@@ -3,7 +3,6 @@ package goes
 import (
 	"fmt"
 	"hash/fnv"
-	"io/ioutil"
 	"log"
 	"os"
 	"sort"
@@ -51,7 +50,7 @@ func newIndex(idx string, home string) (*index, error) {
 	log.Printf("Load index %s", idx)
 
 	// Scan the shards.
-	files, err := ioutil.ReadDir(path)
+	files, err := os.ReadDir(path)
 	if err != nil {
 		return nil, err
 	}
@@ -74,6 +73,25 @@ func newIndex(idx string, home string) (*index, error) {
 func (index *index) close() {
 	for _, shard := range index.shards {
 		shard.close()
+	}
+}
+
+func (index *index) delete() {
+	done := make(chan bool, 0)
+	for _, shard := range index.shards {
+		go func(shard *Shard, done chan bool) {
+			shard.delete()
+			done <- true
+		}(shard, done)
+	}
+	for range index.shards {
+		<-done
+	}
+
+	path := fmt.Sprintf("%s/%s", index.home, index.idx)
+	err := os.RemoveAll(path)
+	if err != nil {
+		log.Println(err)
 	}
 }
 

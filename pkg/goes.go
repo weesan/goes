@@ -158,6 +158,24 @@ func (goes *Goes) Refresh(idx string) (json.Json, error) {
 	}, nil
 }
 
+func (goes *Goes) Delete(idx string) (json.Json, error) {
+	if idx == "" {
+		return json.Json{}, nil
+	} else {
+		// Get the index.
+		if index := goes.findIndex(idx); index != nil {
+			// Delete the index.
+			index.delete()
+			// Remove the index from the indices array.
+			delete(goes.indices, idx)
+		}
+	}
+
+	return json.Json{
+		"acknowledged": true,
+	}, nil
+}
+
 func (goes *Goes) Search(idx string, term string, size int) (json.Json, error) {
 	if term == "" {
 		term = "*"

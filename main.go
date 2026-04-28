@@ -188,6 +188,12 @@ func refresh_handler(w http.ResponseWriter, r *http.Request) {
 	response(w, r, res, err)
 }
 
+func delete_handler(w http.ResponseWriter, r *http.Request) {
+	idx := r.PathValue("idx")
+	res, err := goes.Delete(idx)
+	response(w, r, res, err)
+}
+
 func serve(server string, port int) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{idx}/{cmd}", idx_handler)
@@ -195,6 +201,7 @@ func serve(server string, port int) {
 	mux.HandleFunc("GET /_cat/{cmd}", cat_handler)
 	mux.HandleFunc("POST /_bulk", bulk_handler)
 	mux.HandleFunc("GET /_refresh", refresh_handler)
+	mux.HandleFunc("DELETE /{idx}", delete_handler)
 
 	log.Printf("Listen on %s:%d", server, port)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf("%s:%d", server, port), mux))
