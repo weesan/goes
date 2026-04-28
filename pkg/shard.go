@@ -144,6 +144,9 @@ func (shard *Shard) search(term string, size int) ([]json.Json, error) {
 		search = bleve.NewSearchRequest(bleve.NewQueryStringQuery(term))
 	}
 
+	search.From = 0
+	search.Size = size
+
 	search_res, err := shard.db.Search(search)
 	if err != nil {
 		log.Printf("Failed to search: %v\n", err)
