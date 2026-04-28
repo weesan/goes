@@ -138,7 +138,7 @@ func (goes *Goes) Index(idx string, data []json.Json) error {
 
 func (goes *Goes) Refresh(idx string) (json.Json, error) {
 	total := 0
-	if idx == "" {
+	if idx == "" || idx == "*" {
 		for _, index := range goes.indices {
 			go index.refresh()
 		}
@@ -159,6 +159,10 @@ func (goes *Goes) Refresh(idx string) (json.Json, error) {
 }
 
 func (goes *Goes) Search(idx string, term string, size int) (json.Json, error) {
+	if term == "" {
+		term = "*"
+	}
+
 	log.Printf("Searching for %s from index %s", term, idx)
 	index := goes.findIndex(idx)
 	if index == nil {

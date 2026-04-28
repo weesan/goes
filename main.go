@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gorilla/mux"
 	"github.com/weesan/goes/json"
 	Goes "github.com/weesan/goes/pkg"
 )
@@ -95,30 +94,34 @@ func getQuery(query url.Values) string {
 	return q
 }
 
-func search_handler(w http.ResponseWriter, r *http.Request) {
+func idx_handler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("%s %s %s %s\n", r.RemoteAddr, r.Method, r.URL, r.Proto)
 
-	vars := mux.Vars(r)
-	idx := vars["idx"]
-
+	idx := r.PathValue("idx")
+	cmd := r.PathValue("cmd")
 	query := r.URL.Query()
 
-	res, err := goes.Search(idx, getQuery(query), getSize(query))
-	response(w, r, res, err)
-}
+	var res json.Json
+	var err error
 
-func count_handler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	idx := vars["idx"]
-	res, err := goes.Count(idx)
+	switch cmd {
+	case "_search":
+		res, err = goes.Search(idx, getQuery(query), getSize(query))
+	case "_count":
+		res, err = goes.Count(idx)
+	case "_refresh":
+		res, err = goes.Refresh(idx)
+	default:
+		log.Printf("Unknown cmd: %s", cmd)
+	}
+
 	response(w, r, res, err)
 }
 
 func cluster_handler(w http.ResponseWriter, r *http.Request) {
 	var res json.Json
-	vars := mux.Vars(r)
 
-	switch vars["cmd"] {
+	switch r.PathValue("cmd") {
 	case "health":
 		log.Printf("Getting cluster health")
 		res = goes.ClusterHealth()
@@ -129,9 +132,8 @@ func cluster_handler(w http.ResponseWriter, r *http.Request) {
 
 func cat_handler(w http.ResponseWriter, r *http.Request) {
 	var res string
-	vars := mux.Vars(r)
 
-	switch vars["cmd"] {
+	switch r.PathValue("cmd") {
 	case "indices":
 		log.Printf("Catting indices")
 		res = goes.CatIndices()
@@ -182,24 +184,20 @@ func bulk_handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func refresh_handler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	idx := vars["idx"]
-	res, err := goes.Refresh(idx)
+	res, err := goes.Refresh("*")
 	response(w, r, res, err)
 }
 
 func serve(server string, port int) {
-	router := mux.NewRouter()
-	router.HandleFunc("/{idx}/_search", search_handler).Methods("GET")
-	router.HandleFunc("/{idx}/_count", count_handler).Methods("GET")
-	router.HandleFunc("/_cluster/{cmd}", cluster_handler).Methods("GET")
-	router.HandleFunc("/_cat/{cmd}", cat_handler).Methods("GET")
-	router.HandleFunc("/_bulk", bulk_handler).Methods("POST")
-	router.HandleFunc("/{idx}/_refresh", refresh_handler).Methods("GET")
-	router.HandleFunc("/_refresh", refresh_handler).Methods("GET")
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{idx}/{cmd}", idx_handler)
+	mux.HandleFunc("GET /_cluster/{cmd}", cluster_handler)
+	mux.HandleFunc("GET /_cat/{cmd}", cat_handler)
+	mux.HandleFunc("POST /_bulk", bulk_handler)
+	mux.HandleFunc("GET /_refresh", refresh_handler)
 
 	log.Printf("Listen on %s:%d", server, port)
-	log.Fatal(http.ListenAndServe(fmt.Sprintf("%s:%d", server, port), router))
+	log.Fatal(http.ListenAndServe(fmt.Sprintf("%s:%d", server, port), mux))
 }
 
 func main() {
