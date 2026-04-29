@@ -3,12 +3,13 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/weesan/goes/json"
 	Goes "github.com/weesan/goes/pkg"
@@ -148,7 +149,7 @@ func cat_handler(w http.ResponseWriter, r *http.Request) {
 func bulk_handler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("%s %s %s %s\n", r.RemoteAddr, r.Method, r.URL, r.Proto)
 
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Println(err)
 		return
@@ -194,6 +195,44 @@ func delete_handler(w http.ResponseWriter, r *http.Request) {
 	response(w, r, res, err)
 }
 
+// 1. Create a custom wrapper for http.ResponseWriter
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+// 2. Override WriteHeader to capture the status code
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+func logging_middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		wrapped := &responseWriter{
+			ResponseWriter: w,
+			statusCode:     http.StatusOK, // Default to 200
+		}
+		next.ServeHTTP(wrapped, r)
+
+		remoteAddr := r.Header.Get("X-Forwarded-For")
+		if remoteAddr == "" {
+			remoteAddr = r.RemoteAddr
+		}
+
+		log.Printf("%s %s %s %s %d %.2f\n", remoteAddr, r.Method, r.URL, r.Proto, wrapped.statusCode, float32(time.Since(start).Microseconds())/1000)
+	})
+}
+
+func chain(handler http.Handler, middlewares ...func(http.Handler) http.Handler) http.Handler {
+	for i := len(middlewares) - 1; i >= 0; i-- {
+		handler = middlewares[i](handler)
+	}
+	return handler
+}
+
 func serve(server string, port int) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{idx}/{cmd}", idx_handler)
@@ -203,8 +242,10 @@ func serve(server string, port int) {
 	mux.HandleFunc("GET /_refresh", refresh_handler)
 	mux.HandleFunc("DELETE /{idx}", delete_handler)
 
+	chained := chain(mux, logging_middleware)
+
 	log.Printf("Listen on %s:%d", server, port)
-	log.Fatal(http.ListenAndServe(fmt.Sprintf("%s:%d", server, port), mux))
+	log.Fatal(http.ListenAndServe(fmt.Sprintf("%s:%d", server, port), chained))
 }
 
 func main() {

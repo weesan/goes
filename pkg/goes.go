@@ -2,7 +2,6 @@ package goes
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"time"
@@ -48,7 +47,7 @@ func NewGoes(cluster, nodeName, home, discovery string) (*Goes, error) {
 	}
 
 	// Scan for indices.
-	files, err := ioutil.ReadDir(home)
+	files, err := os.ReadDir(home)
 	if err != nil {
 		return nil, err
 	}
