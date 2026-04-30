@@ -72,16 +72,23 @@ func response(w http.ResponseWriter, r *http.Request, res json.Json, err error) 
 	fmt.Fprintf(w, string(j)+"\n")
 }
 
-func getSize(query url.Values) int {
-	size_str := query.Get("size")
+func getNum(query url.Values, param string, defaultValue int) int {
+	num_str := query.Get(param)
 
-	size, err := strconv.Atoi(size_str)
+	num, err := strconv.Atoi(num_str)
 	if err != nil {
-		// Return 10 by default.
-		return 10
+		return defaultValue
 	}
 
-	return size
+	return num
+}
+
+func getSize(query url.Values) int {
+	return getNum(query, "size", 10)
+}
+
+func getFrom(query url.Values) int {
+	return getNum(query, "from", 0)
 }
 
 func getQuery(query url.Values) string {
@@ -107,7 +114,7 @@ func idx_handler(w http.ResponseWriter, r *http.Request) {
 
 	switch cmd {
 	case "_search":
-		res, err = goes.Search(idx, getQuery(query), getSize(query))
+		res, err = goes.Search(idx, getQuery(query), getSize(query), getFrom(query))
 	case "_count":
 		res, err = goes.Count(idx)
 	case "_refresh":
@@ -177,7 +184,7 @@ func bulk_handler(w http.ResponseWriter, r *http.Request) {
 			}
 			// Convert the json string to a map.
 			j := json.Loads(line)
-			j["id"] = id
+			j["_id"] = id
 			data = append(data, j)
 		}
 	}

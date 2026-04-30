@@ -131,7 +131,7 @@ func (index *index) index(data []json.Json) error {
 
 	// Sharding.
 	for _, v := range data {
-		id := v["id"]
+		id := v["_id"]
 		bucket := hash(id.(string)) % uint32(len(index.shards))
 		buckets[bucket] = append(buckets[bucket], v)
 	}
@@ -161,13 +161,14 @@ func (index *index) refresh() {
 	}
 }
 
-func (index *index) search(term string, size int) (json.Json, error) {
+func (index *index) search(term string, size int, from int) (json.Json, error) {
 	start := time.Now()
 
 	ch := make(chan []json.Json)
 	for _, shard := range index.shards {
 		go func(ch chan []json.Json, shard *Shard) {
-			res, _ := shard.search(term, size)
+			offset := from / (size * len(index.shards))
+			res, _ := shard.search(term, size, offset)
 			ch <- res
 		}(ch, shard)
 	}
@@ -194,7 +195,9 @@ func (index *index) search(term string, size int) (json.Json, error) {
 	if size > len(results) {
 		size = len(results)
 	}
-	res := results[0:size]
+	begin := from % (size * len(index.shards))
+	end := min(begin+size, len(results))
+	res := results[begin:end]
 
 	took := time.Since(start)
 

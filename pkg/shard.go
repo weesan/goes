@@ -101,7 +101,6 @@ func (shard *Shard) index(data []json.Json) error {
 	}
 
 	for _, v := range data {
-		id := v["id"].(string)
 		if shard.batchSize >= shardBatchSize {
 			// Flush the current batch.
 			shard.db.Batch(shard.batch)
@@ -112,6 +111,7 @@ func (shard *Shard) index(data []json.Json) error {
 		}
 
 		// Index the data keyed by id.
+		id := v["_id"].(string)
 		shard.batch.Index(id, v)
 		// Keep track the batch size.
 		shard.batchSize++
@@ -136,7 +136,7 @@ func (shard *Shard) refresh() {
 	shard.batchSize = 0
 }
 
-func (shard *Shard) search(term string, size int) ([]json.Json, error) {
+func (shard *Shard) search(term string, size int, from int) ([]json.Json, error) {
 	var search *bleve.SearchRequest
 	if term == "" {
 		search = bleve.NewSearchRequest(bleve.NewMatchAllQuery())
@@ -144,7 +144,7 @@ func (shard *Shard) search(term string, size int) ([]json.Json, error) {
 		search = bleve.NewSearchRequest(bleve.NewQueryStringQuery(term))
 	}
 
-	search.From = 0
+	search.From = from
 	search.Size = size
 
 	search_res, err := shard.db.Search(search)

@@ -175,7 +175,7 @@ func (goes *Goes) Delete(idx string) (json.Json, error) {
 	}, nil
 }
 
-func (goes *Goes) Search(idx string, term string, size int) (json.Json, error) {
+func (goes *Goes) Search(idx string, term string, size int, from int) (json.Json, error) {
 	if term == "" {
 		log.Printf("Outputting everything from index %s", idx)
 	} else {
@@ -187,7 +187,7 @@ func (goes *Goes) Search(idx string, term string, size int) (json.Json, error) {
 		return nil, fmt.Errorf("Index not found: %s", idx)
 	}
 
-	return index.search(term, size)
+	return index.search(term, size, from)
 }
 
 func (goes *Goes) ClusterHealth() json.Json {
