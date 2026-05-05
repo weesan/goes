@@ -161,14 +161,16 @@ func (index *index) refresh() {
 	}
 }
 
-func (index *index) search(term string, size int, from int) (json.Json, error) {
+func (index *index) search(params *Params) (json.Json, error) {
 	start := time.Now()
+
+	// Update the from/offset based on the size and shard count.
+	params.from = params.from / (params.size * len(index.shards))
 
 	ch := make(chan []json.Json)
 	for _, shard := range index.shards {
 		go func(ch chan []json.Json, shard *Shard) {
-			offset := from / (size * len(index.shards))
-			res, _ := shard.search(term, size, offset)
+			res, _ := shard.search(params)
 			ch <- res
 		}(ch, shard)
 	}
@@ -185,18 +187,35 @@ func (index *index) search(term string, size int, from int) (json.Json, error) {
 	}
 
 	// Sort the results.
-	sort.SliceStable(results, func(i, j int) bool {
-		s1 := results[i]["_score"].(float64)
-		s2 := results[j]["_score"].(float64)
-		return s1 > s2
-	})
+	if params.sort == "" {
+		sort.SliceStable(results, func(i, j int) bool {
+			s1 := results[i]["_score"].(float64)
+			s2 := results[j]["_score"].(float64)
+			return s1 > s2
+		})
+	} else {
+		sort.SliceStable(results, func(i, j int) bool {
+			s1 := results[i][params.sort]
+			s2 := results[j][params.sort]
+			if s1 == nil || s2 == nil {
+				log.Printf("Failed to sort by %s", params.sort)
+				return false
+			}
+
+			if params.order == "desc" {
+				return s1.(string) > s2.(string)
+			} else {
+				return s1.(string) < s2.(string)
+			}
+		})
+	}
 
 	// Truncate to the right size.
-	if size > len(results) {
-		size = len(results)
+	if params.size > len(results) {
+		params.size = len(results)
 	}
-	begin := from % (size * len(index.shards))
-	end := min(begin+size, len(results))
+	begin := params.from % (params.size * len(index.shards))
+	end := min(begin+params.size, len(results))
 	res := results[begin:end]
 
 	took := time.Since(start)
@@ -218,4 +237,10 @@ func (index *index) search(term string, size int, from int) (json.Json, error) {
 			"hits": res,
 		},
 	}, nil
+}
+
+func (index *index) lookup(id string) (json.Json, error) {
+	shard := index.shards[uint(hash(id)%uint32(len(index.shards)))]
+
+	return shard.lookup(id)
 }

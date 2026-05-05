@@ -136,18 +136,24 @@ func (shard *Shard) refresh() {
 	shard.batchSize = 0
 }
 
-func (shard *Shard) search(term string, size int, from int) ([]json.Json, error) {
-	var search *bleve.SearchRequest
-	if term == "" {
-		search = bleve.NewSearchRequest(bleve.NewMatchAllQuery())
+func (shard *Shard) search(params *Params) ([]json.Json, error) {
+	var searchReq *bleve.SearchRequest
+	if params.q == "" {
+		searchReq = bleve.NewSearchRequest(bleve.NewMatchAllQuery())
 	} else {
-		search = bleve.NewSearchRequest(bleve.NewQueryStringQuery(term))
+		searchReq = bleve.NewSearchRequest(bleve.NewQueryStringQuery(params.q))
 	}
 
-	search.From = from
-	search.Size = size
+	sort := params.sort
+	if params.order == "desc" {
+		sort = "-" + params.sort
+	}
+	searchReq.SortBy([]string{sort})
 
-	search_res, err := shard.db.Search(search)
+	searchReq.From = params.from
+	searchReq.Size = params.size
+
+	search_res, err := shard.db.Search(searchReq)
 	if err != nil {
 		log.Printf("Failed to search: %v\n", err)
 		return nil, err
@@ -157,7 +163,7 @@ func (shard *Shard) search(term string, size int, from int) ([]json.Json, error)
 
 	for i, hit := range search_res.Hits {
 		// Bail when we hit the given size.
-		if i == size {
+		if i == params.size {
 			break
 		}
 
@@ -183,4 +189,35 @@ func (shard *Shard) search(term string, size int, from int) ([]json.Json, error)
 	}
 
 	return res, nil
+}
+
+func (shard *Shard) lookup(id string) (json.Json, error) {
+	doc, err := shard.db.Document(id)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+
+	if doc == nil {
+		return json.Json{
+			"_index": shard.idx,
+			"_shard": shard.num,
+			"_id":    id,
+			"found":  false,
+		}, nil
+	}
+
+	source := make(json.Json, 0)
+	doc.VisitFields(func(field index_api.Field) {
+		key, value := string(field.Name()), string(field.Value())
+		source[key] = value
+	})
+
+	return json.Json{
+		"_index":  shard.idx,
+		"_shard":  shard.num,
+		"_id":     id,
+		"found":   true,
+		"_source": source,
+	}, nil
 }

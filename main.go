@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -72,36 +71,6 @@ func response(w http.ResponseWriter, r *http.Request, res json.Json, err error) 
 	fmt.Fprintf(w, string(j)+"\n")
 }
 
-func getNum(query url.Values, param string, defaultValue int) int {
-	num_str := query.Get(param)
-
-	num, err := strconv.Atoi(num_str)
-	if err != nil {
-		return defaultValue
-	}
-
-	return num
-}
-
-func getSize(query url.Values) int {
-	return getNum(query, "size", 10)
-}
-
-func getFrom(query url.Values) int {
-	return getNum(query, "from", 0)
-}
-
-func getQuery(query url.Values) string {
-	q_str := query.Get("q")
-
-	q, err := url.QueryUnescape(q_str)
-	if err != nil {
-		return ""
-	}
-
-	return q
-}
-
 func idx_handler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("%s %s %s %s\n", r.RemoteAddr, r.Method, r.URL, r.Proto)
 
@@ -114,7 +83,7 @@ func idx_handler(w http.ResponseWriter, r *http.Request) {
 
 	switch cmd {
 	case "_search":
-		res, err = goes.Search(idx, getQuery(query), getSize(query), getFrom(query))
+		res, err = goes.Search(idx, Goes.NewParams(query))
 	case "_count":
 		res, err = goes.Count(idx)
 	case "_refresh":
@@ -123,6 +92,14 @@ func idx_handler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Unknown cmd: %s", cmd)
 	}
 
+	response(w, r, res, err)
+}
+
+func lookup_handler(w http.ResponseWriter, r *http.Request) {
+	idx := r.PathValue("idx")
+	id := r.PathValue("id")
+
+	res, err := goes.Lookup(idx, id)
 	response(w, r, res, err)
 }
 
@@ -243,6 +220,7 @@ func chain(handler http.Handler, middlewares ...func(http.Handler) http.Handler)
 func serve(server string, port int) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{idx}/{cmd}", idx_handler)
+	mux.HandleFunc("GET /{idx}/_doc/{id...}", lookup_handler)
 	mux.HandleFunc("GET /_cluster/{cmd}", cluster_handler)
 	mux.HandleFunc("GET /_cat/{cmd}", cat_handler)
 	mux.HandleFunc("POST /_bulk", bulk_handler)
