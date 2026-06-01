@@ -229,6 +229,14 @@ func chain(handler http.Handler, middlewares ...func(http.Handler) http.Handler)
 	return handler
 }
 
+func options_handler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Allow", "DELETE, GET, OPTIONS, POST")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "DELETE, GET, OPTIONS, POST")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func serve(server string, port int) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{idx}/{cmd}", idx_handler)
@@ -240,6 +248,7 @@ func serve(server string, port int) {
 	mux.HandleFunc("GET /", info_handler)
 	mux.HandleFunc("POST /_bulk", bulk_handler)
 	mux.HandleFunc("DELETE /{idx}", delete_handler)
+	mux.HandleFunc("OPTIONS /", options_handler)
 
 	chained := chain(mux, logging_middleware)
 
