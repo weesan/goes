@@ -232,6 +232,12 @@ func (index *index) search(params *Params) (json.Json, error) {
 	return result, nil
 }
 
+func (index *index) lookup(id string) (json.Json, error) {
+	shard := index.shards[uint(hash(id)%uint32(len(index.shards)))]
+
+	return shard.lookup(id)
+}
+
 func (index *index) mappings() (json.Json, error) {
 	type result struct {
 		props json.Json
@@ -291,10 +297,4 @@ func (index *index) aggregate(aggs map[string]AggDef) json.Json {
 		}
 	}
 	return result
-}
-
-func (index *index) lookup(id string) (json.Json, error) {
-	shard := index.shards[uint(hash(id)%uint32(len(index.shards)))]
-
-	return shard.lookup(id)
 }
