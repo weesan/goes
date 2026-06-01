@@ -23,6 +23,7 @@ import (
 
 	"github.com/blevesearch/bleve/v2"
 	index_api "github.com/blevesearch/bleve_index_api"
+	bleveMapping "github.com/blevesearch/bleve/v2/mapping"
 	"github.com/weesan/goes/json"
 )
 
@@ -134,6 +135,45 @@ func (shard *Shard) refresh() {
 	// Reset the batch after.
 	shard.batch = nil
 	shard.batchSize = 0
+}
+
+func bleveTypeToESType(t string) string {
+	switch t {
+	case "number":
+		return "double"
+	case "datetime":
+		return "date"
+	case "boolean":
+		return "boolean"
+	case "geopoint":
+		return "geo_point"
+	case "geoshape":
+		return "geo_shape"
+	case "IP":
+		return "ip"
+	default:
+		return "text"
+	}
+}
+
+func (shard *Shard) fields() (json.Json, error) {
+	names, err := shard.db.Fields()
+	if err != nil {
+		return nil, err
+	}
+
+	impl, hasImpl := shard.db.Mapping().(*bleveMapping.IndexMappingImpl)
+
+	properties := make(json.Json)
+	for _, name := range names {
+		esType := "text"
+		if hasImpl {
+			fm := impl.FieldMappingForPath(name)
+			esType = bleveTypeToESType(fm.Type)
+		}
+		properties[name] = json.Json{"type": esType}
+	}
+	return properties, nil
 }
 
 func (shard *Shard) docSource(id string) (json.Json, error) {

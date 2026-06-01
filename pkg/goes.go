@@ -190,6 +190,18 @@ func (goes *Goes) Search(idx string, params *Params) (json.Json, error) {
 	return index.search(params)
 }
 
+func (goes *Goes) Mappings(idx string) (json.Json, error) {
+	index := goes.findIndex(idx)
+	if index == nil {
+		return nil, fmt.Errorf("Index not found: %s", idx)
+	}
+	m, err := index.mappings()
+	if err != nil {
+		return nil, err
+	}
+	return json.Json{idx: m}, nil
+}
+
 func (goes *Goes) Lookup(idx string, id string) (json.Json, error) {
 	index := goes.findIndex(idx)
 	if index == nil {

@@ -239,6 +239,37 @@ func (index *index) search(params *Params) (json.Json, error) {
 	}, nil
 }
 
+func (index *index) mappings() (json.Json, error) {
+	type result struct {
+		props json.Json
+		err   error
+	}
+	ch := make(chan result, len(index.shards))
+	for _, shard := range index.shards {
+		go func(shard *Shard) {
+			props, err := shard.fields()
+			ch <- result{props, err}
+		}(shard)
+	}
+
+	merged := make(json.Json)
+	for range index.shards {
+		r := <-ch
+		if r.err != nil {
+			return nil, r.err
+		}
+		for k, v := range r.props {
+			merged[k] = v
+		}
+	}
+
+	return json.Json{
+		"mappings": json.Json{
+			"properties": merged,
+		},
+	}, nil
+}
+
 func (index *index) lookup(id string) (json.Json, error) {
 	shard := index.shards[uint(hash(id)%uint32(len(index.shards)))]
 

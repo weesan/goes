@@ -88,6 +88,8 @@ func idx_handler(w http.ResponseWriter, r *http.Request) {
 		res, err = goes.Count(idx)
 	case "_refresh":
 		res, err = goes.Refresh(idx)
+	case "_mappings":
+		res, err = goes.Mappings(idx)
 	default:
 		log.Printf("Unknown cmd: %s", cmd)
 	}
