@@ -71,6 +71,10 @@ func response(w http.ResponseWriter, r *http.Request, res json.Json, err error) 
 	fmt.Fprintf(w, string(j)+"\n")
 }
 
+func info_handler(w http.ResponseWriter, r *http.Request) {
+	response(w, r, goes.Info(), nil)
+}
+
 func idx_handler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("%s %s %s %s\n", r.RemoteAddr, r.Method, r.URL, r.Proto)
 
@@ -225,8 +229,9 @@ func serve(server string, port int) {
 	mux.HandleFunc("GET /{idx}/_doc/{id...}", lookup_handler)
 	mux.HandleFunc("GET /_cluster/{cmd}", cluster_handler)
 	mux.HandleFunc("GET /_cat/{cmd}", cat_handler)
-	mux.HandleFunc("POST /_bulk", bulk_handler)
 	mux.HandleFunc("GET /_refresh", refresh_handler)
+	mux.HandleFunc("GET /", info_handler)
+	mux.HandleFunc("POST /_bulk", bulk_handler)
 	mux.HandleFunc("DELETE /{idx}", delete_handler)
 
 	chained := chain(mux, logging_middleware)

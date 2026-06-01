@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/weesan/goes/json"
@@ -20,11 +22,13 @@ const (
 type status int
 
 type Goes struct {
-	cluster string
-	home    string
-	indices indices
-	status  status
-	nodes   nodes
+	cluster  string
+	nodeName string
+	version  string
+	home     string
+	indices  indices
+	status   status
+	nodes    nodes
 }
 
 func init() {
@@ -35,7 +39,26 @@ func (s status) String() string {
 	return []string{"green", "yellow", "red"}[s]
 }
 
+func bleveVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	for _, dep := range info.Deps {
+		if dep.Path == "github.com/blevesearch/bleve/v2" {
+			return strings.TrimPrefix(dep.Version, "v")
+		}
+	}
+	return "unknown"
+}
+
 func NewGoes(cluster, nodeName, home, discovery string) (*Goes, error) {
+	versionBytes, err := os.ReadFile("VERSION")
+	if err != nil {
+		log.Printf("Failed to read VERSION file: %v", err)
+	}
+	version := strings.TrimSpace(string(versionBytes))
+
 	// Check if the home path exists.
 	if _, err := os.Stat(home); os.IsNotExist(err) {
 		log.Printf("Create %s", home)
@@ -84,11 +107,13 @@ func NewGoes(cluster, nodeName, home, discovery string) (*Goes, error) {
 	nodes[nodeName] = node
 
 	return &Goes{
-		cluster: cluster,
-		home:    home,
-		indices: indices,
-		status:  GREEN,
-		nodes:   nodes,
+		cluster:  cluster,
+		nodeName: nodeName,
+		version:  version,
+		home:     home,
+		indices:  indices,
+		status:   GREEN,
+		nodes:    nodes,
 	}, nil
 }
 
@@ -210,6 +235,21 @@ func (goes *Goes) Lookup(idx string, id string) (json.Json, error) {
 	}
 
 	return index.lookup(id)
+}
+
+func (goes *Goes) Info() json.Json {
+	return json.Json{
+		"name":         goes.nodeName,
+		"cluster_name": goes.cluster,
+		"cluster_uuid": "_na_",
+		"version": json.Json{
+			"number":         goes.version,
+			"build_flavor":   "default",
+			"build_snapshot": false,
+			"bleve_version":  bleveVersion(),
+		},
+		"tagline": "GOES, a faster way to index and search",
+	}
 }
 
 func (goes *Goes) ClusterHealth() json.Json {
