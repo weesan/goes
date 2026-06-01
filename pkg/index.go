@@ -207,7 +207,7 @@ func (index *index) search(params *Params) (json.Json, error) {
 		res = results[begin:end]
 	}
 
-	return json.Json{
+	result := json.Json{
 		"took":      time.Since(start).Microseconds(),
 		"timed_out": false,
 		"_shards": json.Json{
@@ -223,7 +223,13 @@ func (index *index) search(params *Params) (json.Json, error) {
 			},
 			"hits": res,
 		},
-	}, nil
+	}
+
+	if len(params.aggs) > 0 {
+		result["aggregations"] = index.aggregate(params.aggs)
+	}
+
+	return result, nil
 }
 
 func (index *index) mappings() (json.Json, error) {
@@ -255,6 +261,36 @@ func (index *index) mappings() (json.Json, error) {
 			"properties": merged,
 		},
 	}, nil
+}
+
+func (index *index) runFiltersAgg(filtersAgg *FiltersAggDef) json.Json {
+	buckets := make(json.Json)
+	for bucketName, filterDef := range filtersAgg.Filters {
+		var total uint64
+		for fieldName, termDef := range filterDef.Term {
+			ch := make(chan uint64, len(index.shards))
+			for _, shard := range index.shards {
+				go func(shard *Shard, field, value string) {
+					ch <- shard.termCount(field, value)
+				}(shard, fieldName, termDef.Value)
+			}
+			for range index.shards {
+				total += <-ch
+			}
+		}
+		buckets[bucketName] = json.Json{"doc_count": total}
+	}
+	return json.Json{"buckets": buckets}
+}
+
+func (index *index) aggregate(aggs map[string]AggDef) json.Json {
+	result := make(json.Json)
+	for aggName, aggDef := range aggs {
+		if aggDef.Filters != nil {
+			result[aggName] = index.runFiltersAgg(aggDef.Filters)
+		}
+	}
+	return result
 }
 
 func (index *index) lookup(id string) (json.Json, error) {

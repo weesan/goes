@@ -308,6 +308,18 @@ func (shard *Shard) search(params *Params) ([]json.Json, error) {
 	return res, nil
 }
 
+func (shard *Shard) termCount(field, value string) uint64 {
+	q := bleve.NewTermQuery(value)
+	q.SetField(field)
+	req := bleve.NewSearchRequest(q)
+	req.Size = 0
+	res, err := shard.db.Search(req)
+	if err != nil {
+		return 0
+	}
+	return res.Total
+}
+
 func (shard *Shard) lookup(id string) (json.Json, error) {
 	source, err := shard.docSource(id)
 	if err != nil {

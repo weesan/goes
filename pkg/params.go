@@ -1,6 +1,7 @@
 package goes
 
 import (
+	"encoding/json"
 	"net/url"
 	"strconv"
 	"strings"
@@ -12,6 +13,13 @@ type Params struct {
 	from  int
 	sort  string
 	order string
+	aggs  map[string]AggDef
+}
+
+type searchBody struct {
+	Size         *int              `json:"size"`
+	From         *int              `json:"from"`
+	Aggregations map[string]AggDef `json:"aggregations"`
 }
 
 func getParam(query url.Values, param string) string {
@@ -48,5 +56,24 @@ func NewParams(query url.Values) *Params {
 		sort, order = sorts[0], sorts[1]
 	}
 
-	return &Params{q, size, from, sort, order}
+	return &Params{q: q, size: size, from: from, sort: sort, order: order}
+}
+
+func (p *Params) ParseBody(body []byte) {
+	if len(body) == 0 {
+		return
+	}
+	var b searchBody
+	if err := json.Unmarshal(body, &b); err != nil {
+		return
+	}
+	if b.Size != nil {
+		p.size = *b.Size
+	}
+	if b.From != nil {
+		p.from = *b.From
+	}
+	if b.Aggregations != nil {
+		p.aggs = b.Aggregations
+	}
 }

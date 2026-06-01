@@ -87,7 +87,13 @@ func idx_handler(w http.ResponseWriter, r *http.Request) {
 
 	switch cmd {
 	case "_search":
-		res, err = goes.Search(idx, Goes.NewParams(query))
+		params := Goes.NewParams(query)
+		if r.Body != nil {
+			if body, readErr := io.ReadAll(r.Body); readErr == nil {
+				params.ParseBody(body)
+			}
+		}
+		res, err = goes.Search(idx, params)
 	case "_count":
 		res, err = goes.Count(idx)
 	case "_refresh":
@@ -226,6 +232,7 @@ func chain(handler http.Handler, middlewares ...func(http.Handler) http.Handler)
 func serve(server string, port int) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{idx}/{cmd}", idx_handler)
+	mux.HandleFunc("POST /{idx}/{cmd}", idx_handler)
 	mux.HandleFunc("GET /{idx}/_doc/{id...}", lookup_handler)
 	mux.HandleFunc("GET /_cluster/{cmd}", cluster_handler)
 	mux.HandleFunc("GET /_cat/{cmd}", cat_handler)
