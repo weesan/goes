@@ -20,10 +20,10 @@ import (
 	"log"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/blevesearch/bleve/v2"
 	index_api "github.com/blevesearch/bleve_index_api"
-	bleveMapping "github.com/blevesearch/bleve/v2/mapping"
 	"github.com/weesan/goes/json"
 )
 
@@ -90,6 +90,40 @@ func (shard *Shard) count() uint64 {
 	return 0
 }
 
+var dateFormats = []string{
+	time.RFC3339,
+	time.RFC3339Nano,
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04:05",
+	"2006-01-02",
+	"2006/01/02",
+}
+
+func parseDate(s string) (time.Time, bool) {
+	for _, fmt := range dateFormats {
+		if t, err := time.Parse(fmt, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func detectDates(v json.Json) json.Json {
+	out := make(json.Json, len(v))
+	for k, val := range v {
+		if len(k) > 0 && k[0] != '_' {
+			if s, ok := val.(string); ok {
+				if t, ok := parseDate(s); ok {
+					out[k] = t
+					continue
+				}
+			}
+		}
+		out[k] = val
+	}
+	return out
+}
+
 // The format of data is as follows:
 // { "id1": "json_str1", "id2": "json_str2", ... }
 func (shard *Shard) index(data []json.Json) error {
@@ -113,7 +147,7 @@ func (shard *Shard) index(data []json.Json) error {
 
 		// Index the data keyed by id.
 		id := v["_id"].(string)
-		shard.batch.Index(id, v)
+		shard.batch.Index(id, detectDates(v))
 		// Keep track the batch size.
 		shard.batchSize++
 	}
@@ -137,20 +171,32 @@ func (shard *Shard) refresh() {
 	shard.batchSize = 0
 }
 
-func bleveTypeToESType(t string) string {
-	switch t {
-	case "number":
-		return "double"
-	case "datetime":
+func fieldValue(field index_api.Field) interface{} {
+	switch f := field.(type) {
+	case index_api.DateTimeField:
+		if t, _, err := f.DateTime(); err == nil {
+			return t.Format(time.RFC3339)
+		}
+	case index_api.NumericField:
+		if n, err := f.Number(); err == nil {
+			return n
+		}
+	case index_api.BooleanField:
+		if b, err := f.Boolean(); err == nil {
+			return b
+		}
+	}
+	return string(field.Value())
+}
+
+func fieldESType(field index_api.Field) string {
+	switch field.(type) {
+	case index_api.DateTimeField:
 		return "date"
-	case "boolean":
+	case index_api.NumericField:
+		return "double"
+	case index_api.BooleanField:
 		return "boolean"
-	case "geopoint":
-		return "geo_point"
-	case "geoshape":
-		return "geo_shape"
-	case "IP":
-		return "ip"
 	default:
 		return "text"
 	}
@@ -162,14 +208,23 @@ func (shard *Shard) fields() (json.Json, error) {
 		return nil, err
 	}
 
-	impl, hasImpl := shard.db.Mapping().(*bleveMapping.IndexMappingImpl)
+	// Sample one document to detect actual stored field types.
+	fieldTypes := make(map[string]string)
+	req := bleve.NewSearchRequest(bleve.NewMatchAllQuery())
+	req.Size = 1
+	if res, err := shard.db.Search(req); err == nil && len(res.Hits) > 0 {
+		if doc, err := shard.db.Document(res.Hits[0].ID); err == nil && doc != nil {
+			doc.VisitFields(func(field index_api.Field) {
+				fieldTypes[string(field.Name())] = fieldESType(field)
+			})
+		}
+	}
 
 	properties := make(json.Json)
 	for _, name := range names {
 		esType := "text"
-		if hasImpl {
-			fm := impl.FieldMappingForPath(name)
-			esType = bleveTypeToESType(fm.Type)
+		if t, ok := fieldTypes[name]; ok {
+			esType = t
 		}
 		properties[name] = json.Json{"type": esType}
 	}
@@ -182,20 +237,22 @@ func (shard *Shard) docSource(id string) (json.Json, error) {
 		return nil, err
 	}
 	if doc == nil {
-		return nil, nil
+		log.Printf("Document %q found in index but has no stored fields", id)
+		return json.Json{}, nil
 	}
 
 	source := make(json.Json)
 	doc.VisitFields(func(field index_api.Field) {
-		key, value := string(field.Name()), string(field.Value())
+		key := string(field.Name())
+		val := fieldValue(field)
 		if existing, ok := source[key]; ok {
 			if arr, ok := existing.([]interface{}); ok {
-				source[key] = append(arr, value)
+				source[key] = append(arr, val)
 			} else {
-				source[key] = []interface{}{existing, value}
+				source[key] = []interface{}{existing, val}
 			}
 		} else {
-			source[key] = value
+			source[key] = val
 		}
 	})
 	return source, nil

@@ -164,8 +164,9 @@ func (index *index) refresh() {
 func (index *index) search(params *Params) (json.Json, error) {
 	start := time.Now()
 
-	// Update the from/offset based on the size and shard count.
-	params.from = params.from / (params.size * len(index.shards))
+	if params.size > 0 {
+		params.from = params.from / (params.size * len(index.shards))
+	}
 
 	ch := make(chan []json.Json)
 	for _, shard := range index.shards {
@@ -178,50 +179,36 @@ func (index *index) search(params *Params) (json.Json, error) {
 	successful := 0
 	results := make([]json.Json, 0)
 	for range index.shards {
-		r := <-ch
-		if len(r) == 0 {
-			continue
+		if r := <-ch; len(r) > 0 {
+			successful++
+			results = append(results, r...)
 		}
-		successful++
-		results = append(results, r...)
 	}
 
-	// Sort the results.
-	if params.sort == "" {
-		sort.SliceStable(results, func(i, j int) bool {
-			s1 := results[i]["_score"].(float64)
-			s2 := results[j]["_score"].(float64)
-			return s1 > s2
-		})
-	} else {
-		sort.SliceStable(results, func(i, j int) bool {
-			s1 := results[i][params.sort]
-			s2 := results[j][params.sort]
-			if s1 == nil || s2 == nil {
-				log.Printf("Failed to sort by %s", params.sort)
-				return false
-			}
+	sort.SliceStable(results, func(i, j int) bool {
+		if params.sort == "" {
+			return results[i]["_score"].(float64) > results[j]["_score"].(float64)
+		}
+		s1, s2 := results[i][params.sort], results[j][params.sort]
+		if s1 == nil || s2 == nil {
+			log.Printf("Failed to sort by %s", params.sort)
+			return false
+		}
+		if params.order == "desc" {
+			return s1.(string) > s2.(string)
+		}
+		return s1.(string) < s2.(string)
+	})
 
-			if params.order == "desc" {
-				return s1.(string) > s2.(string)
-			} else {
-				return s1.(string) < s2.(string)
-			}
-		})
+	res := []json.Json{}
+	if size := min(params.size, len(results)); size > 0 {
+		begin := params.from % (size * len(index.shards))
+		end := min(begin+size, len(results))
+		res = results[begin:end]
 	}
-
-	// Truncate to the right size.
-	if params.size > len(results) {
-		params.size = len(results)
-	}
-	begin := params.from % (params.size * len(index.shards))
-	end := min(begin+params.size, len(results))
-	res := results[begin:end]
-
-	took := time.Since(start)
 
 	return json.Json{
-		"took":      took.Microseconds(),
+		"took":      time.Since(start).Microseconds(),
 		"timed_out": false,
 		"_shards": json.Json{
 			"total":      len(index.shards),
