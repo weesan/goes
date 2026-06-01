@@ -136,6 +136,31 @@ func (shard *Shard) refresh() {
 	shard.batchSize = 0
 }
 
+func (shard *Shard) docSource(id string) (json.Json, error) {
+	doc, err := shard.db.Document(id)
+	if err != nil {
+		return nil, err
+	}
+	if doc == nil {
+		return nil, nil
+	}
+
+	source := make(json.Json)
+	doc.VisitFields(func(field index_api.Field) {
+		key, value := string(field.Name()), string(field.Value())
+		if existing, ok := source[key]; ok {
+			if arr, ok := existing.([]interface{}); ok {
+				source[key] = append(arr, value)
+			} else {
+				source[key] = []interface{}{existing, value}
+			}
+		} else {
+			source[key] = value
+		}
+	})
+	return source, nil
+}
+
 func (shard *Shard) search(params *Params) ([]json.Json, error) {
 	var searchReq *bleve.SearchRequest
 	if params.q == "" {
@@ -168,17 +193,12 @@ func (shard *Shard) search(params *Params) ([]json.Json, error) {
 		}
 
 		id := hit.ID
-		doc, err := shard.db.Document(id)
+		source, err := shard.docSource(id)
 		if err != nil {
 			log.Println(err)
 			return nil, err
 		}
 
-		source := make(json.Json, 0)
-		doc.VisitFields(func(field index_api.Field) {
-			key, value := string(field.Name()), string(field.Value())
-			source[key] = value
-		})
 		res = append(res, json.Json{
 			"_index":  shard.idx,
 			"_shard":  shard.num,
@@ -192,13 +212,13 @@ func (shard *Shard) search(params *Params) ([]json.Json, error) {
 }
 
 func (shard *Shard) lookup(id string) (json.Json, error) {
-	doc, err := shard.db.Document(id)
+	source, err := shard.docSource(id)
 	if err != nil {
 		log.Println(err)
 		return nil, err
 	}
 
-	if doc == nil {
+	if source == nil {
 		return json.Json{
 			"_index": shard.idx,
 			"_shard": shard.num,
@@ -206,12 +226,6 @@ func (shard *Shard) lookup(id string) (json.Json, error) {
 			"found":  false,
 		}, nil
 	}
-
-	source := make(json.Json, 0)
-	doc.VisitFields(func(field index_api.Field) {
-		key, value := string(field.Name()), string(field.Value())
-		source[key] = value
-	})
 
 	return json.Json{
 		"_index":  shard.idx,
