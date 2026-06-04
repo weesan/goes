@@ -197,7 +197,7 @@ func (index *index) search(params *Params) (json.Json, error) {
 
 	sort.SliceStable(results, func(i, j int) bool {
 		if params.sort == "" {
-			if params.q == "" {
+			if params.q == "" && params.rawQuery == nil {
 				return results[i]["_id"].(string) > results[j]["_id"].(string)
 			}
 			s1 := results[i]["_score"].(float64)
@@ -206,6 +206,14 @@ func (index *index) search(params *Params) (json.Json, error) {
 				return s1 > s2
 			}
 			return results[i]["_id"].(string) < results[j]["_id"].(string)
+		}
+		if params.sort == "_id" {
+			id1 := results[i]["_id"].(string)
+			id2 := results[j]["_id"].(string)
+			if params.order == "desc" {
+				return id1 > id2
+			}
+			return id1 < id2
 		}
 		si, _ := results[i]["_source"].(json.Json)
 		sj, _ := results[j]["_source"].(json.Json)

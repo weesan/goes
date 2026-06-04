@@ -8,18 +8,22 @@ import (
 )
 
 type Params struct {
-	q     string
-	size  int
-	from  int
-	sort  string
-	order string
-	aggs  map[string]AggDef
+	q        string
+	size     int
+	from     int
+	sort     string
+	order    string
+	aggs     map[string]AggDef
+	rawQuery map[string]interface{}
 }
 
 type searchBody struct {
-	Size         *int              `json:"size"`
-	From         *int              `json:"from"`
-	Aggregations map[string]AggDef `json:"aggregations"`
+	Size         *int                   `json:"size"`
+	From         *int                   `json:"from"`
+	Query        map[string]interface{} `json:"query"`
+	Sort         []interface{}          `json:"sort"`
+	Aggregations map[string]AggDef      `json:"aggregations"`
+	Aggs         map[string]AggDef      `json:"aggs"`
 }
 
 func getParam(query url.Values, param string) string {
@@ -73,7 +77,42 @@ func (p *Params) ParseBody(body []byte) {
 	if b.From != nil {
 		p.from = *b.From
 	}
-	if b.Aggregations != nil {
+	if b.Query != nil {
+		p.rawQuery = b.Query
+	}
+	switch {
+	case b.Aggregations != nil:
 		p.aggs = b.Aggregations
+	case b.Aggs != nil:
+		p.aggs = b.Aggs
+	}
+	if len(b.Sort) > 0 {
+		p.parseSort(b.Sort)
+	}
+}
+
+func (p *Params) parseSort(sortList []interface{}) {
+	for _, item := range sortList {
+		switch sv := item.(type) {
+		case string:
+			if sv == "_doc" {
+				p.sort = "_id"
+			} else {
+				p.sort = sv
+			}
+			p.order = "asc"
+		case map[string]interface{}:
+			for field, dir := range sv {
+				if field == "_doc" {
+					p.sort = "_id"
+				} else {
+					p.sort = field
+				}
+				if s, ok := dir.(string); ok {
+					p.order = s
+				}
+			}
+		}
+		return // only use first sort criterion
 	}
 }

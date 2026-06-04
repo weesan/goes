@@ -260,10 +260,17 @@ func (shard *Shard) docSource(id string) (json.Json, error) {
 
 func (shard *Shard) search(params *Params) ([]json.Json, uint64, error) {
 	var searchReq *bleve.SearchRequest
-	if params.q == "" {
-		searchReq = bleve.NewSearchRequest(bleve.NewMatchAllQuery())
-	} else {
+	if params.rawQuery != nil {
+		q, err := parseESQuery(params.rawQuery)
+		if err != nil {
+			log.Printf("Failed to parse query: %v", err)
+			q = bleve.NewMatchAllQuery()
+		}
+		searchReq = bleve.NewSearchRequest(q)
+	} else if params.q != "" {
 		searchReq = bleve.NewSearchRequest(bleve.NewQueryStringQuery(params.q))
+	} else {
+		searchReq = bleve.NewSearchRequest(bleve.NewMatchAllQuery())
 	}
 
 	if params.sort != "" {
@@ -272,7 +279,7 @@ func (shard *Shard) search(params *Params) ([]json.Json, uint64, error) {
 			sortField = "-" + params.sort
 		}
 		searchReq.SortBy([]string{sortField})
-	} else if params.q == "" {
+	} else if params.q == "" && params.rawQuery == nil {
 		searchReq.SortBy([]string{"-_id"})
 	}
 

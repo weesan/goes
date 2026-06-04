@@ -1,7 +1,26 @@
 package goes
 
+import "encoding/json"
+
+// TermFieldDef accepts both {"value": "x"} and plain "x".
 type TermFieldDef struct {
-	Value string `json:"value"`
+	Value string
+}
+
+func (t *TermFieldDef) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		t.Value = s
+		return nil
+	}
+	var obj struct {
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return err
+	}
+	t.Value = obj.Value
+	return nil
 }
 
 type FilterDef struct {
