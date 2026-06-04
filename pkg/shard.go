@@ -258,7 +258,7 @@ func (shard *Shard) docSource(id string) (json.Json, error) {
 	return source, nil
 }
 
-func (shard *Shard) search(params *Params) ([]json.Json, error) {
+func (shard *Shard) search(params *Params) ([]json.Json, uint64, error) {
 	var searchReq *bleve.SearchRequest
 	if params.q == "" {
 		searchReq = bleve.NewSearchRequest(bleve.NewMatchAllQuery())
@@ -266,11 +266,15 @@ func (shard *Shard) search(params *Params) ([]json.Json, error) {
 		searchReq = bleve.NewSearchRequest(bleve.NewQueryStringQuery(params.q))
 	}
 
-	sort := params.sort
-	if params.order == "desc" {
-		sort = "-" + params.sort
+	if params.sort != "" {
+		sortField := params.sort
+		if params.order == "desc" {
+			sortField = "-" + params.sort
+		}
+		searchReq.SortBy([]string{sortField})
+	} else if params.q == "" {
+		searchReq.SortBy([]string{"-_id"})
 	}
-	searchReq.SortBy([]string{sort})
 
 	searchReq.From = params.from
 	searchReq.Size = params.size
@@ -278,7 +282,7 @@ func (shard *Shard) search(params *Params) ([]json.Json, error) {
 	search_res, err := shard.db.Search(searchReq)
 	if err != nil {
 		log.Printf("Failed to search: %v\n", err)
-		return nil, err
+		return nil, 0, err
 	}
 
 	res := []json.Json{}
@@ -293,7 +297,7 @@ func (shard *Shard) search(params *Params) ([]json.Json, error) {
 		source, err := shard.docSource(id)
 		if err != nil {
 			log.Println(err)
-			return nil, err
+			return nil, 0, err
 		}
 
 		res = append(res, json.Json{
@@ -305,7 +309,7 @@ func (shard *Shard) search(params *Params) ([]json.Json, error) {
 		})
 	}
 
-	return res, nil
+	return res, search_res.Total, nil
 }
 
 func (shard *Shard) lookup(id string) (json.Json, error) {

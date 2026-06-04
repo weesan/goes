@@ -164,47 +164,69 @@ func (index *index) refresh() {
 func (index *index) search(params *Params) (json.Json, error) {
 	start := time.Now()
 
-	if params.size > 0 {
-		params.from = params.from / (params.size * len(index.shards))
+	// Each shard starts from 0 and returns from+size candidates so the index
+	// has enough results to satisfy global pagination.
+	shardParams := *params
+	shardParams.from = 0
+	shardParams.size = params.from + params.size
+
+	type shardResult struct {
+		hits  []json.Json
+		total uint64
 	}
 
-	ch := make(chan []json.Json)
+	ch := make(chan shardResult)
 	for _, shard := range index.shards {
-		go func(ch chan []json.Json, shard *Shard) {
-			res, _ := shard.search(params)
-			ch <- res
+		go func(ch chan shardResult, shard *Shard) {
+			hits, total, _ := shard.search(&shardParams)
+			ch <- shardResult{hits, total}
 		}(ch, shard)
 	}
 
+	var totalMatching uint64
 	successful := 0
 	results := make([]json.Json, 0)
 	for range index.shards {
-		if r := <-ch; len(r) > 0 {
+		r := <-ch
+		totalMatching += r.total
+		if len(r.hits) > 0 {
 			successful++
-			results = append(results, r...)
+			results = append(results, r.hits...)
 		}
 	}
 
 	sort.SliceStable(results, func(i, j int) bool {
 		if params.sort == "" {
-			return results[i]["_score"].(float64) > results[j]["_score"].(float64)
+			if params.q == "" {
+				return results[i]["_id"].(string) > results[j]["_id"].(string)
+			}
+			s1 := results[i]["_score"].(float64)
+			s2 := results[j]["_score"].(float64)
+			if s1 != s2 {
+				return s1 > s2
+			}
+			return results[i]["_id"].(string) < results[j]["_id"].(string)
 		}
-		s1, s2 := results[i][params.sort], results[j][params.sort]
-		if s1 == nil || s2 == nil {
-			log.Printf("Failed to sort by %s", params.sort)
+		si, _ := results[i]["_source"].(json.Json)
+		sj, _ := results[j]["_source"].(json.Json)
+		if si == nil || sj == nil {
+			return false
+		}
+		v1, v2 := si[params.sort], sj[params.sort]
+		if v1 == nil || v2 == nil {
+			log.Printf("Failed to sort by %s: field missing", params.sort)
 			return false
 		}
 		if params.order == "desc" {
-			return s1.(string) > s2.(string)
+			return v1.(string) > v2.(string)
 		}
-		return s1.(string) < s2.(string)
+		return v1.(string) < v2.(string)
 	})
 
 	res := []json.Json{}
-	if size := min(params.size, len(results)); size > 0 {
-		begin := params.from % (size * len(index.shards))
-		end := min(begin+size, len(results))
-		res = results[begin:end]
+	if params.from < len(results) {
+		end := min(params.from+params.size, len(results))
+		res = results[params.from:end]
 	}
 
 	result := json.Json{
@@ -218,7 +240,7 @@ func (index *index) search(params *Params) (json.Json, error) {
 		},
 		"hits": json.Json{
 			"total": json.Json{
-				"value":    len(res),
+				"value":    totalMatching,
 				"relation": "eq",
 			},
 			"hits": res,
